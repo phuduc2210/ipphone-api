@@ -3,6 +3,7 @@ import nodemailer from "nodemailer"
 import path from "path";
 import { fileURLToPath } from "url";
 import { db } from "../connectDB.js";
+import fs from "fs";
 
 const otps = {};
 const transporter = nodemailer.createTransport({
@@ -32,7 +33,7 @@ export const sendOtp = (req, res) => {
 
         // Tạo OTP
         const otp = crypto.randomInt(100000, 999999).toString();
-        const otpExpires = Date.now() + 3 * 60 * 1000; // OTP hết hạn sau 3 phút
+        const otpExpires = Date.now() + 60 * 60 * 1000; // OTP hết hạn sau 3 phút
         const updateQuery = 'UPDATE users SET otp = ? WHERE imei = ?';
         db.query(updateQuery, [otp, imei], (updateErr) => {
             if (updateErr) {
@@ -48,7 +49,7 @@ export const sendOtp = (req, res) => {
                         console.log(`OTP for IMEI ${imei} has been deleted.`);
                     }
                 });
-            }, 3 * 60 * 1000);
+            }, 60 * 60 * 1000);
         })
         // Lưu OTP vào bộ nhớ
         otps[imei] = { otp, otpExpires, otpUsed: false };
@@ -112,6 +113,26 @@ export const verifyOtp = (req, res) => {
     });
 }
 
+// export const downloadFile = (req, res) => {
+//     // const { email } = req.body;
+//     const { filename } = req.params;
+//     const __filename = fileURLToPath(import.meta.url);
+//     const __dirname = path.dirname(__filename);
+//     const filePath = path.join(__dirname, "../public/images", filename);
+
+//     // Kiểm tra quyền truy cập
+//     // if (!email || !otps[email]?.otpUsed) {
+//     //     return res.status(403).json({ message: 'Unauthorized to download.' });
+//     // }
+
+//     res.download(filePath, filename, (err) => {
+//         if (err) {
+//             console.error("Error downloading the file:", err);
+//             res.status(500).send("Error downloading the file.");
+//         }
+//     });
+// }
+
 export const downloadFile = (req, res) => {
     // const { email } = req.body;
     const { filename } = req.params;
@@ -119,16 +140,31 @@ export const downloadFile = (req, res) => {
     const __dirname = path.dirname(__filename);
     const filePath = path.join(__dirname, "../public/images", filename);
 
-    // Kiểm tra quyền truy cập
-    // if (!email || !otps[email]?.otpUsed) {
-    //     return res.status(403).json({ message: 'Unauthorized to download.' });
-    // }
+    // Kiểm tra file có tồn tại
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "File not found." });
+    }
 
-    res.download(filePath, filename, (err) => {
-        if (err) {
-            console.error("Error downloading the file:", err);
-            res.status(500).send("Error downloading the file.");
-        }
+    // Đặt headers cho response
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/octet-stream");
+
+    // Tạo stream đọc file
+    const fileStream = fs.createReadStream(filePath);
+
+    // Xử lý lỗi trong quá trình đọc file
+    fileStream.on("error", (err) => {
+        console.error("Error reading the file:", err);
+        res.status(500).json({ message: "Error reading the file." });
+    });
+
+    // Pipe stream tới response
+    fileStream.pipe(res);
+
+    // Xử lý khi client hủy request
+    req.on("aborted", () => {
+        console.warn("Request aborted by the client.");
+        fileStream.destroy();
     });
 }
 
